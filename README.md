@@ -15,46 +15,57 @@ Two strategies are compared:
 
 - GPU: NVIDIA Tesla T4 (Google Colab)
 - Framework: PyTorch
-- Models: ResNet-18 and ResNet-50
+- Models: ResNet-18 (~97 ms per step) and ResNet-50 (~322 ms per step)
 - Data: random tensors (224x224, batch size 32), so data loading does not affect the measurement
-- 200 training steps per run
+- 200 training steps per run, each configuration repeated 3 times
 - Checkpoint every 50, 20 and 10 steps
 - Checkpoint size: ~90 MB (ResNet-18), ~189 MB (ResNet-50), including SGD momentum
 
-Overhead = extra training time compared to the same run without checkpointing.
+Overhead = extra training time compared to a run without checkpointing (baseline measured in the same repeat).
 
-## Results (first run)
+## Results (mean ± std, 3 repeats)
 
-| Model | Interval | Sync overhead | Async overhead |
+Training time overhead:
+
+| Model | Interval (steps) | Sync | Async |
 |---|---|---|---|
-| ResNet-18 | 50 | 5.78% | 7.62% |
-| ResNet-18 | 20 | 18.72% | 19.48% |
-| ResNet-18 | 10 | 29.56% | 14.17% |
-| ResNet-50 | 50 | 1.53% | 0.08% |
-| ResNet-50 | 20 | 3.70% | 0.87% |
-| ResNet-50 | 10 | 11.99% | 1.47% |
+| ResNet-18 | 50 | 4.18% ± 1.62 | 0.94% ± 0.42 |
+| ResNet-18 | 20 | 7.01% ± 0.29 | 1.98% ± 0.43 |
+| ResNet-18 | 10 | 26.25% ± 9.21 | 4.53% ± 1.11 |
+| ResNet-50 | 50 | 1.89% ± 0.61 | 0.08% ± 0.56 |
+| ResNet-50 | 20 | 5.21% ± 0.49 | 0.95% ± 0.66 |
+| ResNet-50 | 10 | 25.67% ± 15.81 | 1.97% ± 0.28 |
 
-These numbers are from a single run. I am now repeating each configuration 3 times to check how stable they are.
+Time training is blocked per checkpoint: about 0.15 s (sync) vs 0.04 s (async) for ResNet-18, and about 0.35 s (sync) vs 0.07 s (async) for ResNet-50.
+
+![Overhead plot](overhead_plot.png)
+
+Raw data: [`results/results_raw.csv`](results/results_raw.csv), summary: [`results/results_summary.csv`](results/results_summary.csv).
 
 ## Observations
 
-- Overhead grows fast when checkpoints are frequent. With sync saving every 10 steps, ResNet-18 training became about 30% slower.
-- For ResNet-50, async saving almost removed the cost: at a 10-step interval the overhead dropped from about 12% to about 1.5%.
-- For ResNet-18, async did not help at 50 and 20 steps and was even slightly worse than sync, even though the time training was blocked per checkpoint was shorter (about 0.05 s vs 0.13 s).
+1. **Async saving reduced overhead for both models at every interval.** At a 10-step interval, overhead dropped from ~26% to ~4.5% (ResNet-18) and from ~26% to ~2% (ResNet-50).
 
-My current explanation: ResNet-18 steps are short (about 88 ms per step), so the background write overlaps with training and they compete for CPU, memory bandwidth and the Python GIL. ResNet-50 steps are about 4 times longer (about 343 ms), so the write can finish with less interference. So async saving seems to be worth it when each training step takes much longer than writing the checkpoint. I still need more experiments to confirm this.
+2. **Sync saving becomes unstable when checkpoints are frequent.** At a 10-step interval the standard deviation is very large (± 9 and ± 16 points). In one ResNet-50 run the overhead reached 43%, and the blocked time per checkpoint grew from ~0.35 s to ~1.4 s. My guess is that the storage cannot absorb writes this fast, so later writes have to wait for earlier ones to be flushed.
+
+3. **Async has a hidden cost: write backlog.** For ResNet-18 at a 10-step interval, training finished on time, but in one run the background writes needed **27 extra seconds** to finish after training ended (2.9 s in another run, under 0.2 s in the rest). That interval produces roughly 90 MB of checkpoint data per second, which seems to be more than the disk could sustain. ResNet-50 at the same interval produces about 57 MB/s and never built a backlog (≤ 0.4 s). While a backlog exists, the newest checkpoints are not yet on disk, so a crash at that moment would lose more work than expected, and the queued snapshots also use CPU memory.
+
+4. **A single run was misleading.** My first single-run test suggested async was slightly worse than sync for ResNet-18 at long intervals. With 3 repeats this did not hold: async was better in every configuration. The earlier result was within run-to-run noise.
+
+**Takeaway:** async checkpointing hides most of the cost, but only as long as the checkpoint data rate stays below what the storage can write. Above that, the cost moves from "training is slower" to "checkpoints are late".
 
 ## Limitations
 
-- One GPU only. Real HPC systems save checkpoints from many nodes to parallel file systems.
+- One GPU and one local disk. Real HPC systems save from many nodes to parallel file systems, where bandwidth is shared.
 - Synthetic data only.
-- Results table above is from one run.
+- Only 3 repeats; the high-variance configurations would need more.
+- The storage explanations above are hypotheses; I did not measure disk throughput directly.
 
 ## Next steps
 
-- Repeat each configuration and report mean and standard deviation.
-- Find out which part of the async path causes the slowdown (CPU copy, disk write, or GIL).
-- Try larger models and different storage (local disk vs. network storage).
+- Measure the disk write bandwidth directly and check whether the backlog starts exactly when the checkpoint data rate exceeds it.
+- Limit the async queue (e.g. skip or wait if the previous checkpoint is still being written) and measure the trade-off.
+- Try larger models and different storage (local disk vs. Google Drive / network storage).
 
 ## Running it
 
