@@ -74,7 +74,7 @@ def run(model_name, interval, mode, steps, batch, ckpt_dir, device):
     loss_fn = nn.CrossEntropyLoss()
 
     # Synthetic data: isolates checkpoint cost from data-loading cost.
-        if model_name == "gpt2":
+     if model_name == "gpt2":
         x = torch.randint(0, 50257, (batch, 128), device=device)
 
         def compute_loss():
