@@ -54,6 +54,19 @@ Raw data: [`results/results_raw.csv`](results/results_raw.csv), summary: [`resul
 
 **Takeaway:** async checkpointing hides most of the cost, but only as long as the checkpoint data rate stays below what the storage can write. Above that, the cost moves from "training is slower" to "checkpoints are late".
 
+## Preliminary GPT-2 result
+
+I also tried GPT-2 small (124M parameters, random weights, batch size 8, sequence length 128, 200 steps, about 0.26-0.32 s per step). The run was interrupted before all three repeats finished, so these numbers are preliminary:
+
+| Interval (steps) | Mode | Run 1 | Run 2 |
+|---|---|---|---|
+| 50 | sync | 93% | 100% |
+| 50 | async | 25% | 1.5% |
+| 20 | sync | 238% | 504% |
+| 20 | async | 37% | not finished |
+
+With a checkpoint this large, each synchronous save blocked training for roughly 12-16 s (estimated from the totals), compared with about 0.3 s per training step. Saving every 50 steps about doubled the training time. Async saving was much cheaper, but it varied a lot between the two runs, and the baseline itself differed (52.8 s vs 63.5 s). I will rerun this with more repeats before drawing conclusions.
+
 ## Limitations
 
 - One GPU and one local disk. Real HPC systems save from many nodes to parallel file systems, where bandwidth is shared.
