@@ -82,4 +82,4 @@ Code written with help from AI coding tools.
 
 ## Author
 
-Sadek Al-Hakeem, Automation and AI Engineering, Al-Nahrain University, Baghdad
+Sadeq Al-Hakeem, Automation and AI Engineering, Al-Nahrain University, Baghdad
