@@ -66,6 +66,14 @@ Raw data: [`results/results_raw.csv`](results/results_raw.csv), summary: [`resul
 - Measure the disk write bandwidth directly and check whether the backlog starts exactly when the checkpoint data rate exceeds it.
 - Limit the async queue (e.g. skip or wait if the previous checkpoint is still being written) and measure the trade-off.
 - Try larger models and different storage (local disk vs. Google Drive / network storage).
+- Save only part of the state (for example weights without optimizer buffers, or only the layers that changed, as in LLMTailor) and check whether smaller checkpoints avoid the backlog.
+
+## Related work
+
+This is a small single-GPU experiment. Two papers study the same problem at real scale:
+
+- Xu et al., "An Efficient Checkpointing System for Large Machine Learning Model Training" (SC-W 2024). Checkpoints are first written to node-local storage and then moved to the shared file system asynchronously. The authors note that insufficient node-local memory can overflow and interrupt training, which is the large-scale version of the backlog I observed here.
+- Sun et al., "LLMTailor: A Layer-wise Tailoring Tool for Efficient Checkpointing of Large Language Models" (PDSW 2025). Only the layers that changed significantly are checkpointed, which reduces checkpoint size and time.
 
 ## Running it
 
