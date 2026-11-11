@@ -37,6 +37,9 @@ def get_model(name):
         return models.resnet18(num_classes=10)
     if name == "resnet50":
         return models.resnet50(num_classes=10)
+        if name == "gpt2":
+        from transformers import GPT2Config, GPT2LMHeadModel
+        return GPT2LMHeadModel(GPT2Config())
     raise ValueError(f"Unknown model: {name}")
 
 
@@ -71,12 +74,21 @@ def run(model_name, interval, mode, steps, batch, ckpt_dir, device):
     loss_fn = nn.CrossEntropyLoss()
 
     # Synthetic data: isolates checkpoint cost from data-loading cost.
-    x = torch.randn(batch, 3, 224, 224, device=device)
-    y = torch.randint(0, 10, (batch,), device=device)
+        if model_name == "gpt2":
+        x = torch.randint(0, 50257, (batch, 128), device=device)
+
+        def compute_loss():
+            return model(x, labels=x).loss
+    else:
+        x = torch.randn(batch, 3, 224, 224, device=device)
+        y = torch.randint(0, 10, (batch,), device=device)
+
+        def compute_loss():
+            return loss_fn(model(x), y)
 
     def train_step():
         opt.zero_grad(set_to_none=True)
-        loss = loss_fn(model(x), y)
+        loss = compute_loss()
         loss.backward()
         opt.step()
 
