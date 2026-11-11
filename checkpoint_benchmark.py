@@ -37,7 +37,7 @@ def get_model(name):
         return models.resnet18(num_classes=10)
     if name == "resnet50":
         return models.resnet50(num_classes=10)
-        if name == "gpt2":
+    if name == "gpt2":
         from transformers import GPT2Config, GPT2LMHeadModel
         return GPT2LMHeadModel(GPT2Config())
     raise ValueError(f"Unknown model: {name}")
