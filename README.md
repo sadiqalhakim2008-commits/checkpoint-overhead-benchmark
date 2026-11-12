@@ -54,31 +54,41 @@ Raw data: [`results/results_raw.csv`](results/results_raw.csv), summary: [`resul
 
 **Takeaway:** async checkpointing hides most of the cost, but only as long as the checkpoint data rate stays below what the storage can write. Above that, the cost moves from "training is slower" to "checkpoints are late".
 
-## Preliminary GPT-2 result
+## GPT-2 small (large checkpoint)
 
-I also tried GPT-2 small (124M parameters, random weights, batch size 8, sequence length 128, 200 steps, about 0.26-0.32 s per step). The run was interrupted before all three repeats finished, so these numbers are preliminary:
+To see what happens with a much bigger checkpoint, I repeated the test with GPT-2 small (124M parameters, random weights, batch size 8, sequence length 128, 200 steps, about 0.28 s per step), checkpointing every 50 steps. Checkpoint size is about 1 GB (model + SGD momentum). 3 repeats.
 
-| Interval (steps) | Mode | Run 1 | Run 2 |
+| Mode | Overhead during training | Blocked time per checkpoint | Time until all checkpoints are on disk, vs. no checkpointing |
 |---|---|---|---|
-| 50 | sync | 93% | 100% |
-| 50 | async | 25% | 1.5% |
-| 20 | sync | 238% | 504% |
-| 20 | async | 37% | not finished |
+| sync | 131.5% ± 63.0 (199%, 74%, 122%) | 18.7 s ± 7.8 | same as training time |
+| async | 7.1% ± 4.8 (11.5%, 7.9%, 2.0%) | 0.57 s ± 0.27 | +275%, +203%, +24% |
 
-With a checkpoint this large, each synchronous save blocked training for roughly 12-16 s (estimated from the totals), compared with about 0.3 s per training step. Saving every 50 steps about doubled the training time. Async saving was much cheaper, but it varied a lot between the two runs, and the baseline itself differed (52.8 s vs 63.5 s). I will rerun this with more repeats before drawing conclusions.
+Raw data: [`results/gpt2_results_raw.csv`](results/gpt2_results_raw.csv), [`results/gpt2_results_summary.csv`](results/gpt2_results_summary.csv).
+
+What I see:
+
+1. **Async hides almost all of the blocking.** Training itself was only 2-12% slower, compared with 74-199% for sync. Each synchronous save stopped training for 11-27 s, which is about 40-95 training steps' worth of time.
+
+2. **But the writes did not keep up.** In runs 1 and 2 the background writer was still working 146 s and 115 s after training had ended (13 s in run 3). So the time until all four checkpoints were actually on disk was *longer* for async than for sync in two of the three runs (208 s vs 165 s, 178 s vs 102 s), and shorter only in run 3 (73 s vs 130 s). On average the two were similar (153 s vs 133 s). The "7% overhead" number only counts the training loop; it does not mean the checkpoints are safe.
+
+3. **Disk speed varied a lot between runs.** Dividing the 996 MB sync checkpoint by its blocked time gives an effective write speed of 37, 90 and 55 MB/s in the three runs. This is why the sync overhead has such a large spread (± 63 points). I did not benchmark the disk separately, so I cannot say whether this comes from Colab's storage or something else.
+
+4. **Possible bug in my async path.** The async checkpoint is 1150 MB while the sync one is 996 MB. The difference, 154 MB, is exactly the size of GPT-2's embedding matrix (50257 x 768 x 4 bytes). My guess is that GPT-2 shares this matrix between the input embedding and the output layer, `torch.save` stores it once, but my CPU copy breaks the sharing so it gets written twice. This means async wrote about 15% more data than sync here, which makes its backlog look slightly worse than it should. I have not tested this yet.
 
 ## Limitations
 
 - One GPU and one local disk. Real HPC systems save from many nodes to parallel file systems, where bandwidth is shared.
 - Synthetic data only.
-- Only 3 repeats; the high-variance configurations would need more.
+- Only 3 repeats; the high-variance configurations (10-step ResNet, all GPT-2 sync runs) would need more.
+- GPT-2 was only tested at a 50-step interval.
 - The storage explanations above are hypotheses; I did not measure disk throughput directly.
 
 ## Next steps
 
 - Measure the disk write bandwidth directly and check whether the backlog starts exactly when the checkpoint data rate exceeds it.
 - Limit the async queue (e.g. skip or wait if the previous checkpoint is still being written) and measure the trade-off.
-- Try larger models and different storage (local disk vs. Google Drive / network storage).
+- Check the tied-embedding explanation for the larger async checkpoint (GPT-2) and fix the copy so both modes write the same amount of data.
+- Try more intervals for GPT-2 and different storage (local disk vs. Google Drive / network storage).
 - Save only part of the state (for example weights without optimizer buffers, or only the layers that changed, as in LLMTailor) and check whether smaller checkpoints avoid the backlog.
 
 ## Related work
@@ -95,6 +105,7 @@ On Google Colab with a T4 GPU:
 ```bash
 !python checkpoint_benchmark.py              # 3 repeats, about 35 min
 !python checkpoint_benchmark.py --repeats 1  # quick run
+!python checkpoint_benchmark.py --models gpt2 --intervals 50 --batch 8  # GPT-2, about 10 min
 ```
 
 Output files: `results_raw.csv`, `results_summary.csv`, `overhead_plot.png`.
