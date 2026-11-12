@@ -49,14 +49,24 @@ def sync_device(device):
         torch.cuda.synchronize()
 
 
-def to_cpu(obj):
-    """Deep-copy every tensor in a (nested) state dict to CPU memory."""
+def to_cpu(obj, memo=None):
+    """Deep-copy every tensor in a (nested) state dict to CPU memory.
+
+    Tensors that share the same memory (for example GPT-2's input embedding and
+    output layer) are copied once and the copy is shared too, so torch.save
+    writes them once, like it does for the original state dict.
+    """
+    if memo is None:
+        memo = {}
     if torch.is_tensor(obj):
-        return obj.detach().to("cpu", copy=True)
+        key = (obj.device, obj.data_ptr(), tuple(obj.shape), obj.stride())
+        if key not in memo:
+            memo[key] = obj.detach().to("cpu", copy=True)
+        return memo[key]
     if isinstance(obj, dict):
-        return {k: to_cpu(v) for k, v in obj.items()}
+        return {k: to_cpu(v, memo) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return type(obj)(to_cpu(v) for v in obj)
+        return type(obj)(to_cpu(v, memo) for v in obj)
     return obj
 
 
