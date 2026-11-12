@@ -1,0 +1,4 @@
+model,mode,interval,repeats,overhead_mean_pct,overhead_std_pct,stall_mean_s,stall_std_s,ckpt_size_mb
+gpt2,none,0,3,0.0,0.0,0.0,0.0,0.0
+gpt2,sync,50,3,100.94,54.163,13.882,8.837,995.6
+gpt2,async,50,3,8.36,8.791,0.491,0.069,995.6
